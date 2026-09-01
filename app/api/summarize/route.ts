@@ -42,8 +42,8 @@ export async function POST(request: Request) {
       prompt: `Başlık: ${title}\nKaynak: ${source ?? "belirtilmedi"}\n\nHaber metni:\n${article || "(metin alınamadı, yalnız başlık mevcut)"}`,
     })
     return Response.json({ summary: text.trim(), source: article ? "article" : "title" })
-  } catch (e) {
-    console.log("[v0] summarize error:", e instanceof Error ? e.message : String(e))
-    return Response.json({ summary: `${title} — kaynak: ${source ?? "bilinmiyor"}. Otomatik özet şu an oluşturulamadı, başlıktan ilerleyin.`, source: "fallback" })
+  } catch {
+    const lead = article ? article.split("\n")[0].slice(0, 220) : title
+    return Response.json({ summary: `${lead}${article ? "" : ` (${source ?? "kaynak"})`}`, source: article ? "excerpt" : "title" })
   }
 }
