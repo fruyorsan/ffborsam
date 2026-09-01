@@ -1,11 +1,15 @@
 import { NextRequest } from "next/server"
 import { analyzeCandles, horizonAdvice, type Candle } from "@/lib/indicators"
+import { bistStocks } from "@/lib/bist-stocks"
 
 type Asset = { yahoo: string; name: string; market: "BIST" | "ABD" | "MAKRO" }
 const assets: Record<string, Asset> = {
-  TUPRS:{yahoo:"TUPRS.IS",name:"Tüpraş",market:"BIST"},THYAO:{yahoo:"THYAO.IS",name:"Türk Hava Yolları",market:"BIST"},ASELS:{yahoo:"ASELS.IS",name:"Aselsan",market:"BIST"},BIMAS:{yahoo:"BIMAS.IS",name:"BİM Mağazalar",market:"BIST"},KCHOL:{yahoo:"KCHOL.IS",name:"Koç Holding",market:"BIST"},EREGL:{yahoo:"EREGL.IS",name:"Ereğli Demir Çelik",market:"BIST"},AKBNK:{yahoo:"AKBNK.IS",name:"Akbank",market:"BIST"},GARAN:{yahoo:"GARAN.IS",name:"Garanti BBVA",market:"BIST"},SISE:{yahoo:"SISE.IS",name:"Şişecam",market:"BIST"},FROTO:{yahoo:"FROTO.IS",name:"Ford Otosan",market:"BIST"},
   AAPL:{yahoo:"AAPL",name:"Apple",market:"ABD"},MSFT:{yahoo:"MSFT",name:"Microsoft",market:"ABD"},NVDA:{yahoo:"NVDA",name:"NVIDIA",market:"ABD"},GOOGL:{yahoo:"GOOGL",name:"Alphabet",market:"ABD"},AMZN:{yahoo:"AMZN",name:"Amazon",market:"ABD"},META:{yahoo:"META",name:"Meta",market:"ABD"},TSLA:{yahoo:"TSLA",name:"Tesla",market:"ABD"},
   XU100:{yahoo:"XU100.IS",name:"BIST 100",market:"MAKRO"},XU030:{yahoo:"XU030.IS",name:"BIST 30",market:"MAKRO"},SP500:{yahoo:"^GSPC",name:"S&P 500",market:"MAKRO"},NASDAQ:{yahoo:"^IXIC",name:"Nasdaq",market:"MAKRO"},DJI:{yahoo:"^DJI",name:"Dow Jones",market:"MAKRO"},USDTRY:{yahoo:"TRY=X",name:"Dolar / TL",market:"MAKRO"},EURTRY:{yahoo:"EURTRY=X",name:"Euro / TL",market:"MAKRO"},XAUUSD:{yahoo:"GC=F",name:"Ons Altın",market:"MAKRO"},BRENT:{yahoo:"BZ=F",name:"Brent Petrol",market:"MAKRO"},
+}
+// Merge the full BIST equity universe (yahoo symbol = `${ticker}.IS`).
+for (const [ticker, name] of Object.entries(bistStocks)) {
+  assets[ticker] = { yahoo: `${ticker}.IS`, name, market: "BIST" }
 }
 const headers={"User-Agent":"Mozilla/5.0 PiyasaIQ/1.0"}
 // Yahoo quoteSummary requires a session cookie + crumb. Cache them briefly.
