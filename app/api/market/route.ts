@@ -8,6 +8,24 @@ const assets: Record<string, Asset> = {
   XU100:{yahoo:"XU100.IS",name:"BIST 100",market:"MAKRO"},XU030:{yahoo:"XU030.IS",name:"BIST 30",market:"MAKRO"},SP500:{yahoo:"^GSPC",name:"S&P 500",market:"MAKRO"},NASDAQ:{yahoo:"^IXIC",name:"Nasdaq",market:"MAKRO"},DJI:{yahoo:"^DJI",name:"Dow Jones",market:"MAKRO"},USDTRY:{yahoo:"TRY=X",name:"Dolar / TL",market:"MAKRO"},EURTRY:{yahoo:"EURTRY=X",name:"Euro / TL",market:"MAKRO"},XAUUSD:{yahoo:"GC=F",name:"Ons Altın",market:"MAKRO"},BRENT:{yahoo:"BZ=F",name:"Brent Petrol",market:"MAKRO"},
 }
 const headers={"User-Agent":"Mozilla/5.0 PiyasaIQ/1.0"}
+// Yahoo quoteSummary requires a session cookie + crumb. Cache them briefly.
+let session:{cookie:string;crumb:string;expires:number}|null=null
+async function getSession(){
+ if(session&&session.expires>Date.now())return session
+ try{
+  const c=new AbortController(),t=setTimeout(()=>c.abort(),8000)
+  try{
+   const cookieRes=await fetch("https://fc.yahoo.com",{headers,signal:c.signal})
+   const raw=cookieRes.headers.get("set-cookie");if(!raw)return null
+   const cookie=raw.split(";")[0]
+   const crumbRes=await fetch("https://query1.finance.yahoo.com/v1/test/getcrumb",{headers:{...headers,cookie},signal:c.signal})
+   if(!crumbRes.ok)return null
+   const crumb=(await crumbRes.text()).trim();if(!crumb||crumb.includes("<"))return null
+   session={cookie,crumb,expires:Date.now()+50*60*1000}
+   return session
+  }finally{clearTimeout(t)}
+ }catch{return null}
+}
 async function fetchChart(symbol:string,range="1y",interval="1d"){
  const item=assets[symbol]; if(!item) throw new Error("Desteklenmeyen sembol")
  const controller=new AbortController(), timeout=setTimeout(()=>controller.abort(),8000)
@@ -20,7 +38,23 @@ async function fetchChart(symbol:string,range="1y",interval="1d"){
 }
 async function analystData(item:Asset){
  if(item.market==="MAKRO") return null
- try {const r=await fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(item.yahoo)}?modules=financialData,recommendationTrend`,{headers,next:{revalidate:3600}});if(!r.ok)return null;const root=(await r.json())?.quoteSummary?.result?.[0];const f=root?.financialData;return f?{rating:f.recommendationKey??null,score:f.recommendationMean?.raw??null,targetLow:f.targetLowPrice?.raw??null,targetMean:f.targetMeanPrice?.raw??null,targetHigh:f.targetHighPrice?.raw??null,analystCount:f.numberOfAnalystOpinions?.raw??null}:null}catch{return null}
+ try {
+  const s=await getSession();if(!s)return null
+  const r=await fetch(`https://query1.finance.yahoo.com/v10/finance/quoteSummary/${encodeURIComponent(item.yahoo)}?modules=financialData,recommendationTrend&crumb=${encodeURIComponent(s.crumb)}`,{headers:{...headers,cookie:s.cookie},next:{revalidate:3600}})
+  if(!r.ok)return null
+  const root=(await r.json())?.quoteSummary?.result?.[0]
+  const f=root?.financialData
+  const trend=root?.recommendationTrend?.trend?.find((t:{period?:string})=>t.period==="0m")??root?.recommendationTrend?.trend?.[0]
+  const num=(v:unknown)=>Number.isFinite(Number(v))?Number(v):0
+  let distribution=null
+  if(trend){
+   const strongBuy=num(trend.strongBuy),buy=num(trend.buy),hold=num(trend.hold),sell=num(trend.sell),strongSell=num(trend.strongSell)
+   const total=strongBuy+buy+hold+sell+strongSell
+   if(total>0)distribution={buy:strongBuy+buy,hold,sell:sell+strongSell,total}
+  }
+  if(!f&&!distribution)return null
+  return{rating:f?.recommendationKey??null,score:f?.recommendationMean?.raw??null,targetLow:f?.targetLowPrice?.raw??null,targetMean:f?.targetMeanPrice?.raw??null,targetHigh:f?.targetHighPrice?.raw??null,analystCount:f?.numberOfAnalystOpinions?.raw??distribution?.total??null,distribution}
+ }catch{return null}
 }
 async function fetchNews(query:string,count=6){try{const r=await fetch(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=0&newsCount=${count}`,{headers,next:{revalidate:300}});if(!r.ok)return[];const p=await r.json();return(p.news??[]).slice(0,count).map((a:{title?:string;publisher?:string;providerPublishTime?:number;link?:string})=>({title:a.title??"Başlık bulunamadı",source:a.publisher??"Yahoo Finance",url:a.link,publishedAt:a.providerPublishTime?new Date(a.providerPublishTime*1000).toISOString():null}))}catch{return[]}}
 export async function GET(request:NextRequest){

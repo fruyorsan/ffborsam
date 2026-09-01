@@ -25,16 +25,16 @@ export async function POST(request: Request) {
   try {
     const { text } = await generateText({
       model: "anthropic/claude-sonnet-5",
-      temperature: 0.1,
-      maxOutputTokens: 600,
-      system: "Sen ihtiyatlı bir Türkçe şirket ve piyasa analiz asistanısın. Teknik sinyali tekrar edip bırakma; şirketin iş modeline göre verilen emtia, kur, endeks ve haberlerin olası aktarım kanalını açıkla. Örneğin rafineri şirketinde petrol ve marj, ihracatçıda kur, bankada faiz ve endeks bağlamını ilişkilendir. Yalnız verilen veriyi kullan; bilanço, fiyat, haber veya olay uydurma. Bilanço verisi verilmediyse açıkça 'bilanço verisi sağlanmadı' de ve kontrol edilecek kalemleri belirt. Kesin getiri, kesin yön veya alım-satım emri verme. Yanıtı Eylem özeti, Şirketi etkileyenler, İzlenecek teyitler ve Ana risk başlıklarıyla en fazla 180 kelime yaz.",
-      prompt: `Kullanıcı sorusu: ${question}\n\nSembol: ${symbol}\nVeri kaynağı: ${market.source ?? "Yahoo Finance (gecikmeli)"}\nPiyasa zamanı: ${market.updatedAt ?? "belirtilmedi"}\nTeknik veri: ${technical}\nMakro ve emtia bağlamı: ${macro}\nVade planları: ${horizons}\nKaynaklı başlıklar:\n${news}\n\nYanıtta önce net bir özet, sonra soruya doğrudan cevap, izlenecek seviyeler, haber etkisi ve ana risk olsun. Son satırda bunun yatırım tavsiyesi olmadığını belirt.`,
+      temperature: 0.15,
+      maxOutputTokens: 420,
+      system: "Sen keskin, net konuşan bir Türkçe piyasa yorumcususun. İndikatörleri (RSI, MACD, Bollinger vb.) TEK TEK sayma — bunlar ekranda zaten var. Bunun yerine şirketi gerçekten etkileyen 2-3 şeyi kısaca anlat: iş modeline göre emtia/kur/endeks etkisi (ör. rafineride Brent petrol ve rafineri marjı, ihracatçıda kur, bankada faiz) ve varsa güncel haber. Bilanço verisi verilmediyse tek cümleyle 'bilanço verisi sağlanmadı, şu kalemler kontrol edilmeli' de; rakam uydurma. Sonda MUTLAKA kendi kararını ver: AL / SAT / TUT'tan birini seç ve tek cümleyle gerekçelendir. Markdown kullan: en önemli kelime ve kararı **çift yıldızla kalın** yaz. En fazla 110 kelime, akıcı 2-3 kısa paragraf. Kesin getiri veya fiyat garantisi verme.",
+      prompt: `Sembol: ${symbol}\nVeri kaynağı: ${market.source ?? "Yahoo Finance (gecikmeli)"}\nGüncel fiyat/değişim ve teknik özet: ${technical}\nMakro ve emtia bağlamı: ${macro}\nModel konsensüsü: ${market.technical.signal} (%${market.technical.confidence} güven)\nVade planları: ${horizons}\nKaynaklı başlıklar:\n${news}\n\nKısa ve net yaz. Önce şirketi etkileyen ana unsurları anlat, sonra son satırda kalın yazılmış net kararını (**AL** / **SAT** / **TUT**) ver.`,
     })
     return Response.json({ text, source: "claude", model: "anthropic/claude-sonnet-5" })
   } catch {
-    const nearest = market.advice.map(item => `${item.label}: ${item.action} (${item.signal})`).join("\n")
+    const verdict = market.technical.signal.includes("AL") ? "**AL**" : market.technical.signal.includes("SAT") ? "**SAT**" : "**TUT**"
     return Response.json({
-      text: `Özet\n${symbol} teknik konsensüsü ${market.technical.signal}; gösterge güveni %${market.technical.confidence}.\n\nVade planı\n${nearest}\n\nİzlenecek seviyeler\n${market.technical.support.toFixed(2)} altı mevcut görünümü zayıflatabilir; ${market.technical.resistance.toFixed(2)} üstü teyit gerektirir.\n\nHaber ve risk\n${market.news.length ? "Kaynaklı başlıklar mevcut ancak içerikleri doğrulanmadan teknik sonucu değiştiren olay kabul edilmedi." : "Kaynaklı güncel haber bulunmadığı için haber etkisi çıkarılmadı."}\n\nBu kural tabanlı özet yatırım tavsiyesi değildir.`,
+      text: `${symbol} için model konsensüsü **${market.technical.signal}** (%${market.technical.confidence} güven). ${market.technical.support.toFixed(2)} desteği altı görünümü zayıflatır; ${market.technical.resistance.toFixed(2)} direnci üstü yeni alım teyidi verir.\n\n${market.news.length ? "Güncel başlıklar mevcut; tek başına sinyal sayma, emtia/kur ile aynı yönde teyit ararsan güçlenir." : "Kaynaklı güncel haber bulunamadı, haber etkisi çıkarılmadı."} Bilanço verisi sağlanmadı; net kâr marjı ve borçluluk ayrıca kontrol edilmeli.\n\nMevcut teknik tabloya göre kısa vadeli eğilim: ${verdict}. (Bu kural tabanlı özet yatırım tavsiyesi değildir.)`,
       source: "fallback",
     })
   }

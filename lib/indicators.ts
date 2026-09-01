@@ -1,8 +1,12 @@
 export type Candle = { date: string; open: number; high: number; low: number; close: number; volume: number }
 export type Signal = "GÜÇLÜ AL" | "AL" | "TUT" | "SAT" | "GÜÇLÜ SAT"
+export type Verdict = "pos" | "neg" | "neutral"
+export type IndicatorRead = { key: string; group: string; title: string; verdict: Verdict; note: string }
 
 const avg = (values: number[]) => values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
 const finite = (value: number, fallback = 0) => Number.isFinite(value) ? value : fallback
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, finite(value, min)))
+const round = (value: number, digits = 2) => { const f = 10 ** digits; return Math.round(finite(value) * f) / f }
 
 function ema(values: number[], period: number) {
   if (!values.length) return []
@@ -64,9 +68,14 @@ export function analyzeCandles(candles: Candle[]) {
   const deviation = Math.sqrt(avg(closes.slice(-20).map(v => (v - sma20) ** 2)))
   const upper = sma20 + deviation * 2
   const lower = sma20 - deviation * 2
-  const bandwidthPosition = upper === lower ? 50 : ((price - lower) / (upper - lower)) * 100
+  const bandwidthPosition = clamp(upper === lower ? 50 : ((price - lower) / (upper - lower)) * 100, 0, 100)
   const support = Math.min(...candles.slice(-20).map(c => c.low))
   const resistance = Math.max(...candles.slice(-20).map(c => c.high))
+  const volumes = candles.map(c => c.volume).filter(Number.isFinite)
+  const lastVolume = volumes.at(-1) ?? 0
+  const avgVolume = avg(volumes.slice(-20))
+  const volumeRatio = avgVolume ? lastVolume / avgVolume : 1
+  const atrPercent = price ? (currentAtr / price) * 100 : 0
   const swingWindow = candles.slice(-90)
   const swingLow = Math.min(...swingWindow.map(c => c.low))
   const swingHigh = Math.max(...swingWindow.map(c => c.high))
@@ -87,11 +96,52 @@ export function analyzeCandles(candles: Candle[]) {
   score += currentStoch > 55 && currentStoch < 82 ? 1 : currentStoch > 88 ? -1 : 0
   const signal = signalFromScore(score)
   const confidence = Math.min(88, Math.max(48, 52 + Math.abs(score) * 7))
+
+  const rsiRead: IndicatorRead =
+    currentRsi >= 70 ? { key: "rsi", group: "RSI · GÜÇ", title: "AŞIRI ALIM", verdict: "neg", note: "Momentum aşırı alım bölgesinde; geri çekilme riski var." }
+    : currentRsi <= 30 ? { key: "rsi", group: "RSI · GÜÇ", title: "AŞIRI SATIM", verdict: "pos", note: "Aşırı satım bölgesi; tepki alımı gelebilir." }
+    : currentRsi >= 55 ? { key: "rsi", group: "RSI · GÜÇ", title: "GÜÇLÜ", verdict: "pos", note: "Momentum alıcı tarafında." }
+    : currentRsi <= 45 ? { key: "rsi", group: "RSI · GÜÇ", title: "ZAYIF", verdict: "neg", note: "Momentum satıcı tarafında." }
+    : { key: "rsi", group: "RSI · GÜÇ", title: "DENGELİ", verdict: "neutral", note: "Fiyat momentumu aşırı bölgelere girmemiş." }
+
+  const emaRead: IndicatorRead =
+    price > sma20 && sma20 > sma50 ? { key: "ema", group: "EMA · TREND", title: "YUKARI TREND", verdict: "pos", note: "Fiyat EMA20 ve EMA50 üzerinde; yükseliş teyitli." }
+    : price < sma20 && sma20 < sma50 ? { key: "ema", group: "EMA · TREND", title: "AŞAĞI BASKI", verdict: "neg", note: "EMA20, EMA50'nin altında; yükseliş teyitsiz." }
+    : { key: "ema", group: "EMA · TREND", title: "YATAY", verdict: "neutral", note: "Ortalamalar iç içe; net yön oluşmamış." }
+
+  const macdRead: IndicatorRead =
+    macd > macdSignal ? { key: "macd", group: "MACD · MOMENTUM", title: "POZİTİF", verdict: "pos", note: "Momentum hareketi destekliyor." }
+    : { key: "macd", group: "MACD · MOMENTUM", title: "NEGATİF", verdict: "neg", note: "Momentum zayıflıyor, sinyal çizgisi altında." }
+
+  const bollingerRead: IndicatorRead =
+    bandwidthPosition >= 80 ? { key: "bollinger", group: "BOLLINGER · FİYAT ALANI", title: "ÜST BANDA YAKIN", verdict: "neg", note: "Fiyat kısa vadede gerilmiş olabilir." }
+    : bandwidthPosition <= 20 ? { key: "bollinger", group: "BOLLINGER · FİYAT ALANI", title: "ALT BANDA YAKIN", verdict: "pos", note: "Fiyat kısa vadede ucuzlamış olabilir." }
+    : { key: "bollinger", group: "BOLLINGER · FİYAT ALANI", title: "ORTA BANT", verdict: "neutral", note: "Fiyat bant ortasında, dengeli seyrediyor." }
+
+  const stochRead: IndicatorRead =
+    currentStoch >= 80 ? { key: "stochastic", group: "STOCHASTIC · KISA DÖNÜŞ", title: "AŞIRI ALIM", verdict: "neg", note: "Kısa vadeli düzeltme riski artmış." }
+    : currentStoch <= 20 ? { key: "stochastic", group: "STOCHASTIC · KISA DÖNÜŞ", title: "AŞIRI SATIM", verdict: "pos", note: "Kısa vadeli tepki alımı gelebilir." }
+    : { key: "stochastic", group: "STOCHASTIC · KISA DÖNÜŞ", title: "DENGELİ", verdict: "neutral", note: "Kısa vadeli momentum dengeli." }
+
+  const volumeLabel = volumeRatio >= 1.5 ? "YÜKSEK HACİM" : volumeRatio <= 0.6 ? "DÜŞÜK HACİM" : "NORMAL HACİM"
+  const volatilityLabel = atrPercent >= 3 ? "YÜKSEK OYNAKLIK" : atrPercent >= 1.5 ? "ORTA OYNAKLIK" : "DÜŞÜK OYNAKLIK"
+  const riskRead: IndicatorRead = {
+    key: "risk", group: "HACİM / ATR · RİSK",
+    title: `${volumeLabel} · ${volatilityLabel}`,
+    verdict: volumeRatio >= 1.5 ? "pos" : volumeRatio <= 0.6 ? "neg" : "neutral",
+    note: `Ortalama günlük hareket fiyatın %${round(atrPercent, 1)}'i; işlem hacmi ortalamanın ${round(volumeRatio, 1)} katı.`,
+  }
+  const breakdown: IndicatorRead[] = [rsiRead, emaRead, macdRead, bollingerRead, stochRead, riskRead]
+
   return {
-    price, signal, confidence, support, resistance,
-    values: { rsi: currentRsi, macd, macdSignal, sma20, sma50, bollinger: bandwidthPosition, stochastic: currentStoch, atr: currentAtr },
-    fibonacci,
-    chart: candles.slice(-70).map((c, i, rows) => ({ date: c.date, price: c.close, sma: avg(rows.slice(Math.max(0, i - 19), i + 1).map(x => x.close)) })),
+    price: round(price), signal, confidence, support: round(support), resistance: round(resistance),
+    values: {
+      rsi: round(currentRsi), macd: round(macd, 3), macdSignal: round(macdSignal, 3), sma20: round(sma20), sma50: round(sma50),
+      bollinger: round(bandwidthPosition), stochastic: round(currentStoch), atr: round(currentAtr, 3), atrPercent: round(atrPercent), volumeRatio: round(volumeRatio),
+    },
+    fibonacci: Object.fromEntries(Object.entries(fibonacci).map(([k, v]) => [k, round(v)])) as typeof fibonacci,
+    breakdown,
+    chart: candles.slice(-70).map((c, i, rows) => ({ date: c.date, price: round(c.close), sma: round(avg(rows.slice(Math.max(0, i - 19), i + 1).map(x => x.close))) })),
   }
 }
 
